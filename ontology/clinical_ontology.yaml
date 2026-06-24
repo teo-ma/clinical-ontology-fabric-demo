@@ -1,0 +1,104 @@
+# Clinical Ontology Demo — Knowledge Model
+# Demonstrates ontology advantages over flat SQL: taxonomy reasoning,
+# transitive relationships, guideline inference, drug-interaction graphs.
+ontology:
+  name: ClinicalCareOntology
+  version: "1.0"
+  description: >
+    A clinical care ontology covering patients, encounters, conditions (disease taxonomy), medications (drug-class taxonomy), lab tests, providers and referral networks. The taxonomies and relationship tables let an AI agent answer semantic, multi-hop questions that are awkward in flat SQL.
+
+  entities:
+  - name: Patient
+    table: patients
+    key: patient_id
+  - name: Provider
+    table: providers
+    key: provider_id
+  - name: Facility
+    table: facilities
+    key: facility_id
+  - name: Encounter
+    table: encounters
+    key: encounter_id
+  - name: Condition
+    table: condition_ontology
+    key: condition_code
+    hierarchical: true # parent_code builds an IS-A taxonomy
+  - name: Medication
+    table: medication_ontology
+    key: medication_code
+  - name: DrugClass
+    table: drug_class
+    key: class_code
+    hierarchical: true # parent_class_code builds class taxonomy
+  - name: LabTest
+    table: lab_test_ontology
+    key: test_code
+  - name: Specialty
+    table: specialty_ontology
+    key: specialty_code
+    hierarchical: true
+
+  # IS-A taxonomies are pre-expanded into transitive-closure tables so any
+  # ancestor query returns all descendants in a single join.
+  taxonomies:
+  - name: ConditionTaxonomy
+    closure_table: condition_closure # (ancestor_code, descendant_code, depth)
+    example: "CVD -> HTN -> HTN1 (Essential Hypertension)"
+  - name: DrugClassTaxonomy
+    closure_table: drug_class_closure
+    example: "ANTIHTN -> ACEI -> Lisinopril"
+
+  relationships:
+  - name: HAS_ENCOUNTER
+    from: Patient
+    to: Encounter
+    via: encounters.patient_id
+  - name: PERFORMED_BY
+    from: Encounter
+    to: Provider
+    via: encounters.provider_id
+  - name: DIAGNOSED_WITH
+    from: Encounter
+    to: Condition
+    via: diagnoses(encounter_id -> condition_code)
+  - name: PRESCRIBED
+    from: Encounter
+    to: Medication
+    via: prescriptions(encounter_id -> medication_code)
+  - name: MEMBER_OF_CLASS
+    from: Medication
+    to: DrugClass
+    via: medication_ontology.class_code
+  - name: ORDERED_LAB
+    from: Encounter
+    to: LabTest
+    via: lab_results(encounter_id -> test_code)
+  - name: RECOMMENDED_TREATMENT # treats / guideline
+    from: Condition
+    to: DrugClass
+    via: treatment_guideline(condition_code -> recommended_class_code)
+  - name: INTERACTS_WITH # drug-drug interaction graph
+    from: Medication
+    to: Medication
+    via: drug_interaction(med_code_a -> med_code_b)
+    attributes: [ severity, description ]
+  - name: REFERRED # provider referral network
+    from: Provider
+    to: Provider
+    via: referrals(from_provider_id -> to_provider_id)
+  - name: HAS_SPECIALTY
+    from: Provider
+    to: Specialty
+    via: providers.specialty_code
+
+  # Reasoning patterns the ontology unlocks (hard in flat SQL):
+  inference_patterns:
+  - id: taxonomy_rollup
+    description: "Query a high-level condition (e.g. Cardiovascular Disease) and automatically include every descendant diagnosis via condition_closure."
+  - id: guideline_gap
+    description: "Find patients diagnosed with a condition but NOT prescribed any medication in the guideline-recommended drug class."
+  - id: interaction_detection
+    description: "Detect patients co-prescribed two medications that INTERACT_WITH each other, surfacing severity from the interaction graph."
+  - id: referral_network
+    description: "Traverse the provider referral graph to analyse care pathways across specialties."
